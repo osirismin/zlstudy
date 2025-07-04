@@ -13,7 +13,7 @@ import time
 # 配置参数
 TXT_PATH = './zlstudy.txt'  # 修改为相对路径
 WAIT_TIMEOUT = 30
-POLL_FREQUENCY = 60  # 检查间隔（秒）
+POLL_FREQUENCY = 60  # 检查间隔（秒）- 改为10秒，更及时的进度反馈
 COMPLETION_THRESHOLD = 1  # 剩余1秒视为完成
 VIDEO_SELECTOR = "video.dplayer-video-current"  # 根据页面结构调整
 
@@ -29,6 +29,9 @@ def check_login_status(driver):
     return True
 
 def watch_video(driver, url):
+    # 保存主窗口句柄
+    main_window = driver.current_window_handle
+    
     # 新标签页打开
     driver.execute_script("window.open('');")
     driver.switch_to.window(driver.window_handles[-1])
@@ -72,10 +75,27 @@ def watch_video(driver, url):
     except Exception as e:
         print(f"处理视频时出错：{str(e)}")
     finally:
-        # 关闭标签页
-        driver.close()
-        driver.switch_to.window(driver.window_handles[0])
-        time.sleep(1)  # 防止快速切换导致崩溃
+        try:
+            # 安全地关闭当前标签页并切换回主窗口
+            current_window = driver.current_window_handle
+            if len(driver.window_handles) > 1:
+                driver.close()
+                # 切换回主窗口
+                if main_window in driver.window_handles:
+                    driver.switch_to.window(main_window)
+                else:
+                    # 如果主窗口句柄不存在，切换到第一个可用窗口
+                    driver.switch_to.window(driver.window_handles[0])
+            time.sleep(1)  # 防止快速切换导致崩溃
+        except Exception as e:
+            print(f"窗口切换时出错：{str(e)}")
+            # 如果出错，尝试重新创建一个主窗口
+            try:
+                if len(driver.window_handles) == 0:
+                    driver.execute_script("window.open('about:blank');")
+                    driver.switch_to.window(driver.window_handles[0])
+            except:
+                pass
 
 
 def main():
@@ -92,9 +112,24 @@ def main():
     driver = webdriver.Chrome(service=service, options=options)
 
     try:
-        for url in get_video_urls():
+        # 打开主页面并检查登录状态
+        print("正在检查登录状态...")
+        if not check_login_status(driver):
+            print("请先登录网站，然后重新运行脚本！")
+            return
+        
+        print("登录状态正常，开始处理视频...")
+        video_urls = get_video_urls()
+        print(f"总共需要处理 {len(video_urls)} 个视频")
+        
+        for i, url in enumerate(video_urls, 1):
+            print(f"正在处理第 {i}/{len(video_urls)} 个视频")
             watch_video(driver, url)
             time.sleep(2)
+            
+        print("所有视频处理完成！")
+    except Exception as e:
+        print(f"主程序出错：{str(e)}")
     finally:
         driver.quit()
 
