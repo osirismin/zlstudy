@@ -1,14 +1,15 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-浙江继续教育视频自动播放工具 v2.0
+浙江继续教育视频自动播放工具 v2.1
 
 新增功能：
 1. 📋 已完成视频记录 - 自动记录并跳过已看完的视频
 2. ⚠️  失败视频记录 - 记录播放失败的视频，自动跳过避免重复尝试
 3. 🎮 智能进度检测 - 自动检测视频卡住并处理
-4. 📊 详细统计信息 - 显示完成、失败、待处理视频数量
-5. 💾 自动保存进度 - 程序意外退出时保存已完成记录
+4. 🎬 自动播放下一集 - 检测多集视频并自动播放所有集数
+5. 📊 详细统计信息 - 显示完成、失败、待处理视频数量
+6. 💾 自动保存进度 - 程序意外退出时保存已完成记录
 
 文件说明：
 - zlstudy.txt: 视频链接列表
@@ -16,14 +17,22 @@
 - completed_videos.json: 已完成视频记录
 - failed_videos.json: 失败视频记录（含失败原因和时间）
 
+多集视频功能：
+- 自动检测视频页面右侧的集数选择器
+- 支持"第1集"、"第2集"等格式
+- 支持"EP1"、"EP2"等格式
+- 自动播放所有集数直到结束
+- 最大支持50集，防止无限循环
+
 使用方法：
 1. 将视频链接放入 zlstudy.txt 文件
 2. 运行程序，首次需要手动登录
 3. 程序会自动处理视频，跳过已完成和失败的视频
-4. 失败的视频会被自动记录并跳过，避免重复尝试
+4. 对于多集视频，程序会自动播放所有集数
+5. 失败的视频会被自动记录并跳过，避免重复尝试
 
 作者：AI Assistant
-版本：2.0
+版本：2.1
 """
 
 import os
@@ -54,6 +63,8 @@ LOGIN_URL = "https://www.zjce.gov.cn/login"
 BASE_URL = "https://www.zjce.gov.cn"
 STUCK_DETECTION_INTERVAL = 5  # 检测进度卡住的间隔（秒）
 MAX_STUCK_COUNT = 3  # 最大允许进度卡住的次数
+EPISODE_SELECTOR = ".video-episode, .episode-list, .next-episode, [class*='episode'], [class*='Episode']"  # 集数选择器
+MAX_EPISODES_PER_VIDEO = 50  # 每个视频最大集数限制，防止无限循环
 
 def save_completed_videos(completed_videos):
     """保存已完成视频列表到文件"""
@@ -330,7 +341,7 @@ def get_video_urls():
 
 def watch_video(driver, url):
     """
-    观看视频，支持进度卡住检测
+    观看视频，支持进度卡住检测和自动播放下一集
     返回: (是否成功, 失败原因)
     """
     # 保存主窗口句柄
@@ -340,70 +351,196 @@ def watch_video(driver, url):
     driver.execute_script("window.open('');")
     driver.switch_to.window(driver.window_handles[-1])
     driver.get(url)
-
+    
+    episode_count = 0
+    total_episodes_played = 0
+    
     try:
-        # 等待视频加载
-        video = WebDriverWait(driver, WAIT_TIMEOUT).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, VIDEO_SELECTOR)))
+        while episode_count < MAX_EPISODES_PER_VIDEO:
+            episode_count += 1
+            current_episode = f"第{episode_count}集" if episode_count > 1 else "第1集"
+            print(f"🎬 正在播放 {current_episode}")
+            
+            # 等待视频加载
+            video = WebDriverWait(driver, WAIT_TIMEOUT).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, VIDEO_SELECTOR)))
 
-        # 点击视频区域激活播放（重要！）
-        video.click()
-        print("已激活视频交互")
+            # 点击视频区域激活播放（重要！）
+            video.click()
+            print("已激活视频交互")
 
-        # 强制通过JavaScript播放（应对点击失效）
-        driver.execute_script("arguments[0].play();", video)
+            # 强制通过JavaScript播放（应对点击失效）
+            driver.execute_script("arguments[0].play();", video)
 
-        # 监控播放进度
-        retry_count = 0
-        stuck_count = 0
-        last_time = 0
-        stuck_detection_counter = 0
-        
-        while True:
-            duration = driver.execute_script("return arguments[0].duration", video)
-            current_time = driver.execute_script("return arguments[0].currentTime", video)
+            # 监控播放进度
+            retry_count = 0
+            stuck_count = 0
+            last_time = 0
+            stuck_detection_counter = 0
+            
+            episode_completed = False
+            
+            while True:
+                duration = driver.execute_script("return arguments[0].duration", video)
+                current_time = driver.execute_script("return arguments[0].currentTime", video)
 
-            if duration is None or current_time is None:
-                retry_count += 1
-                if retry_count > 3:
-                    print("❌ 无法获取视频时长，跳过此视频")
-                    return False, "无法获取视频时长"
-                time.sleep(3)
-                continue
+                if duration is None or current_time is None:
+                    retry_count += 1
+                    if retry_count > 3:
+                        print(f"❌ 无法获取视频时长，跳过{current_episode}")
+                        return False, f"无法获取视频时长 ({current_episode})"
+                    time.sleep(3)
+                    continue
 
-            print(f"进度: {current_time:.1f}/{duration:.1f}s")
+                print(f"进度: {current_time:.1f}/{duration:.1f}s - {current_episode}")
 
-            # 检查视频是否完成
-            if current_time >= duration - COMPLETION_THRESHOLD:
-                print(f"✅ 视频播放完成：{url}")
-                return True, "播放完成"
+                # 检查视频是否完成
+                if current_time >= duration - COMPLETION_THRESHOLD:
+                    print(f"✅ {current_episode}播放完成")
+                    episode_completed = True
+                    total_episodes_played += 1
+                    break
 
-            # 进度卡住检测 - 每隔几次检查进度是否有变化
-            stuck_detection_counter += 1
-            if stuck_detection_counter >= (STUCK_DETECTION_INTERVAL / POLL_FREQUENCY):
-                if abs(current_time - last_time) < 0.1:  # 进度几乎没有变化
-                    stuck_count += 1
-                    print(f"⚠️  检测到进度可能卡住 ({stuck_count}/{MAX_STUCK_COUNT})")
-                    
-                    if stuck_count >= MAX_STUCK_COUNT:
-                        print(f"❌ 视频进度卡住超过{MAX_STUCK_COUNT}次，跳过此视频：{url}")
-                        return False, "进度卡住"
-                    
-                    # 尝试重新激活视频播放
-                    try:
-                        video.click()
-                        driver.execute_script("arguments[0].play();", video)
-                        print("🔄 尝试重新激活视频播放")
-                    except Exception as e:
-                        print(f"⚠️  重新激活播放失败: {str(e)}")
+                # 进度卡住检测 - 每隔几次检查进度是否有变化
+                stuck_detection_counter += 1
+                if stuck_detection_counter >= (STUCK_DETECTION_INTERVAL / POLL_FREQUENCY):
+                    if abs(current_time - last_time) < 0.1:  # 进度几乎没有变化
+                        stuck_count += 1
+                        print(f"⚠️  检测到进度可能卡住 ({stuck_count}/{MAX_STUCK_COUNT}) - {current_episode}")
                         
-                else:
-                    stuck_count = 0  # 重置卡住计数
-                
-                last_time = current_time
-                stuck_detection_counter = 0
+                        if stuck_count >= MAX_STUCK_COUNT:
+                            print(f"❌ {current_episode}进度卡住超过{MAX_STUCK_COUNT}次，跳过此集")
+                            return False, f"进度卡住 ({current_episode})"
+                        
+                        # 尝试重新激活视频播放
+                        try:
+                            video.click()
+                            driver.execute_script("arguments[0].play();", video)
+                            print(f"🔄 尝试重新激活{current_episode}播放")
+                        except Exception as e:
+                            print(f"⚠️  重新激活播放失败: {str(e)}")
+                            
+                    else:
+                        stuck_count = 0  # 重置卡住计数
+                    
+                    last_time = current_time
+                    stuck_detection_counter = 0
 
-            time.sleep(POLL_FREQUENCY)
+                time.sleep(POLL_FREQUENCY)
+            
+            # 如果当前集播放完成，检查是否有下一集
+            if episode_completed:
+                next_episode_found = False
+                
+                # 寻找下一集的链接
+                try:
+                    print(f"🔍 检查是否有下一集...")
+                    
+                    # 等待页面稳定
+                    time.sleep(2)
+                    
+                    # 尝试多种可能的下一集选择器
+                    next_episode_selectors = [
+                        f"[href*='第{episode_count+1}集'], [title*='第{episode_count+1}集']",
+                        f"[href*='第0{episode_count+1}集'], [title*='第0{episode_count+1}集']",
+                        f"[href*='{episode_count+1}'], [title*='{episode_count+1}']",
+                        f".episode-{episode_count+1}, .ep-{episode_count+1}",
+                        f"[data-episode='{episode_count+1}']",
+                        ".next-episode, .episode-next",
+                        f"a:contains('第{episode_count+1}集')",
+                        f"a:contains('{episode_count+1}')"
+                    ]
+                    
+                    # 也尝试通用的集数选择器
+                    episode_elements = driver.find_elements(By.CSS_SELECTOR, EPISODE_SELECTOR)
+                    
+                    # 检查是否有包含下一集数字的元素
+                    for element in episode_elements:
+                        try:
+                            element_text = element.text.strip()
+                            element_title = element.get_attribute('title') or ""
+                            element_href = element.get_attribute('href') or ""
+                            
+                            # 检查是否包含下一集的标识
+                            next_episode_indicators = [
+                                f"第{episode_count+1}集", f"第0{episode_count+1}集",
+                                f"集{episode_count+1}", f"{episode_count+1}集",
+                                f"EP{episode_count+1}", f"ep{episode_count+1}",
+                                str(episode_count+1)
+                            ]
+                            
+                            for indicator in next_episode_indicators:
+                                if (indicator in element_text or 
+                                    indicator in element_title or 
+                                    indicator in element_href):
+                                    
+                                    print(f"🎯 找到下一集: {element_text or element_title}")
+                                    
+                                    # 点击下一集
+                                    driver.execute_script("arguments[0].click();", element)
+                                    time.sleep(3)
+                                    
+                                    # 检查页面是否有变化
+                                    new_video = driver.find_elements(By.CSS_SELECTOR, VIDEO_SELECTOR)
+                                    if new_video:
+                                        print(f"✅ 成功切换到第{episode_count+1}集")
+                                        next_episode_found = True
+                                        break
+                                    else:
+                                        print(f"⚠️  切换集数失败，没有找到新的视频元素")
+                                        
+                            if next_episode_found:
+                                break
+                                
+                        except Exception as e:
+                            print(f"⚠️  检查集数元素时出错: {str(e)}")
+                            continue
+                    
+                    if not next_episode_found:
+                        # 尝试直接查找包含数字的可点击元素
+                        try:
+                            all_links = driver.find_elements(By.CSS_SELECTOR, "a, button, [onclick], [role='button']")
+                            for link in all_links:
+                                try:
+                                    text = link.text.strip()
+                                    if (f"{episode_count+1}" in text and 
+                                        len(text) <= 20 and  # 避免匹配过长的文本
+                                        ("集" in text or "EP" in text or "ep" in text or text.isdigit())):
+                                        
+                                        print(f"🎯 尝试点击可能的下一集: {text}")
+                                        driver.execute_script("arguments[0].click();", link)
+                                        time.sleep(3)
+                                        
+                                        # 检查是否成功
+                                        new_video = driver.find_elements(By.CSS_SELECTOR, VIDEO_SELECTOR)
+                                        if new_video:
+                                            print(f"✅ 成功切换到下一集: {text}")
+                                            next_episode_found = True
+                                            break
+                                except:
+                                    continue
+                        except Exception as e:
+                            print(f"⚠️  搜索下一集链接时出错: {str(e)}")
+                    
+                except Exception as e:
+                    print(f"❌ 检查下一集时出错: {str(e)}")
+                
+                # 如果没有找到下一集，完成当前视频
+                if not next_episode_found:
+                    print(f"📺 视频播放完成，共播放 {total_episodes_played} 集")
+                    return True, f"播放完成，共{total_episodes_played}集"
+                
+                # 如果找到了下一集，重置一些状态继续循环
+                retry_count = 0
+                stuck_count = 0
+                
+            else:
+                # 当前集没有播放完成，退出
+                break
+        
+        # 超出最大集数限制
+        print(f"⚠️  已达到最大集数限制 ({MAX_EPISODES_PER_VIDEO})，停止播放")
+        return True, f"播放完成，共{total_episodes_played}集（达到限制）"
 
     except Exception as e:
         print(f"❌ 处理视频时出错：{str(e)}")
@@ -452,6 +589,7 @@ def main():
         print("   ✅ 自动跳过已完成的视频")
         print("   ⚠️  自动跳过失败的视频")
         print("   🎮 智能检测视频卡住并自动处理")
+        print("   🎬 自动播放下一集（支持多集视频）")
         print("   💾 自动保存学习进度")
         print("   📊 显示详细进度统计")
         print("=" * 50)
@@ -525,7 +663,12 @@ def main():
                 # 视频成功完成，记录到已完成列表
                 add_completed_video(completed_videos, url)
                 successful_count += 1
-                print(f"✅ 成功完成视频 {i}/{len(remaining_videos)}")
+                
+                # 显示播放的集数信息
+                if "共" in reason and "集" in reason:
+                    print(f"✅ 成功完成视频 {i}/{len(remaining_videos)} - {reason}")
+                else:
+                    print(f"✅ 成功完成视频 {i}/{len(remaining_videos)}")
                 
                 # 如果这个视频之前在失败列表中，移除它
                 if url in failed_videos:
@@ -536,7 +679,7 @@ def main():
                 # 视频失败或卡住，记录到失败列表
                 add_failed_video(failed_videos, url, reason)
                 failed_count += 1
-                print(f"❌ 视频失败，已记录到失败列表 {i}/{len(remaining_videos)}")
+                print(f"❌ 视频失败，已记录到失败列表 {i}/{len(remaining_videos)} - {reason}")
             
             time.sleep(2)
             
