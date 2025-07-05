@@ -1,0 +1,30 @@
+[
+  {
+    "domain": ".www.zjce.gov.cn",
+    "httpOnly": false,
+    "name": "portalToken",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": true,
+    "value": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ7XCJjbGllbnRUeXBlXCI6MSxcInVzZXJNb2JpbGVcIjpcIjEzNzA2NzI4NjMyXCJ9IiwiYXVkIjoid2ViIiwiaXNzIjoic2VydmVyIiwiaWF0IjoxNzUxNjI4ODYxLCJqdGkiOiIzNTdmZmU3Zi0zZTUzLTRjMzYtODU3ZS1iYjhhMGM0ZDQyNmQifQ.MkMMq9nXOPc1VEaPk7YnKHVPTzJLKqyTx8VOZaKXzpU"
+  },
+  {
+    "domain": ".www.zjce.gov.cn",
+    "httpOnly": false,
+    "name": "SESSION_ID",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": true,
+    "value": "4654e586-84c2-414e-8dee-7b9978a030e3"
+  },
+  {
+    "domain": "www.zjce.gov.cn",
+    "expiry": 1751677663,
+    "httpOnly": false,
+    "name": "zjce_login_validate_pwd",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "148f13a6-01dd-436b-8ec6-af9fe70c9956"
+  }
+]
